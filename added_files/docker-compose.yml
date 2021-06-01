@@ -1,0 +1,100 @@
+version: "3.4"
+
+services:
+    postgresdb:
+        build:
+            context: ./docker/postgres
+            dockerfile: Dockerfile
+        environment:
+            - POSTGRES_PASSWORD=devpass
+        volumes:
+            - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+            - postgresql-data:/var/lib/postgresql/data
+        networks:
+            - main
+        ports:
+            - "5432:5432"
+        restart: on-failure
+
+    rabbit:
+        hostname: rabbit
+        image: rabbitmq:3-management
+        environment:
+            - RABBITMQ_DEFAULT_USER=admin
+            - RABBITMQ_DEFAULT_PASS=45ROS_!_hen25
+        networks:
+            - main
+        ports:
+            - "5672:5672"  
+            - "15672:15672"
+        restart: on-failure
+        depends_on:
+            - postgresdb
+    
+    web:
+        build:
+            context: ./
+            dockerfile: Dockerfile
+        volumes:
+            - ./:/usr/src/app
+        networks:
+            - main
+        ports:
+            - "8000:8000"
+        image: web-image
+        depends_on:
+            - postgresdb
+            - rabbit
+
+    nginx:
+        build:
+            context: ./docker/nginx
+            dockerfile: Dockerfile
+        depends_on:
+            - web
+            - postgresdb
+        networks:
+            - main
+        ports:
+            - "80:80"
+        volumes:
+            - ./static/:/static
+
+    celery_beat:
+        command: sh -c "wait-for rabbitmq:5672 && wait-for app:8000 -- celery -A testapp beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+        container_name: celery_beat
+        depends_on:
+            - web
+            - postgresdb
+            - rabbit
+        volumes:
+            - ./:/usr/src/app
+        hostname: celery_beat
+        image: web-image
+        networks:
+            - main
+        restart: on-failure
+
+    celery_worker:
+        command: sh -c "wait-for rabbitmq:5672 && wait-for app:8000 -- celery -A testapp worker -l info"
+        container_name: celery_worker
+        depends_on:
+            - web
+            - postgresdb
+            - rabbit
+        deploy:
+            replicas: 2
+        volumes:
+            - ./:/usr/src/app
+        hostname: celery_worker
+        image: web-image
+        networks:
+            - main
+        restart: on-failure
+            
+
+networks:
+    main:
+
+volumes:
+    postgresql-data:
